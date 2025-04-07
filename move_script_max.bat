@@ -17,6 +17,7 @@ if "%~1"=="-h" (
     echo "2 -> The output folder does not exist"
     echo "3 -> No destination folder specified"
     exit /b 1
+    echo Exit code %ERRORLEVEL%
 )
 
 if "%~1"=="--help" (
@@ -28,6 +29,7 @@ if "%~1"=="--help" (
     echo "2 -> The output folder does not exist"
     echo "3 -> No destination folder specified"
     exit /b 1
+    echo Exit code %ERRORLEVEL%
 )
 
 rem Get parameters
@@ -41,12 +43,14 @@ rem Check if source directory exists
 if not exist "%SourceDir%" (
     echo Error: Source folder does not exist.
     exit /b 2
+    echo Exit code %ERRORLEVEL%
 )
 
 rem Validate input parameters
 if "%TargetDir%"=="" (
     echo Error: Destination folder is not specified.
     exit /b 3
+    echo Exit code %ERRORLEVEL%
 )
 
 rem Create destination folder if it does not exist
@@ -68,7 +72,7 @@ set "SpecificFiles=1"
 if exist "%SourceDir%\%FileToMove%" (
     rem Retrieve file attributes
     set "Attribs="
-    for /f "tokens=2 delims= " %%A in ('attrib "%SourceDir%\%FileToMove%"') do set "Attribs=!Attribs!%%A"
+    for /f "tokens=1,2 delims= " %%A in ('attrib "%SourceDir%\%FileToMove%"') do set "Attribs=%%B"
 
     rem Display file information before moving
     echo Moving file: %FileToMove% [!Attribs!]
@@ -78,10 +82,11 @@ if exist "%SourceDir%\%FileToMove%" (
 
     move "%SourceDir%\%FileToMove%" "%TargetDir%\" > nul
 
-    rem Restore hidden attribute if it was set
-    if not "!Attribs!"=="" (
-        attrib +h "%TargetDir%\%FileToMove%"
-    )
+    rem Restore original attributes
+    attrib +h "%TargetDir%\%FileToMove%" > nul 2>&1
+    if not "!Attribs:~0,1!"=="H" attrib -h "%TargetDir%\%FileToMove%"
+    if not "!Attribs:~1,1!"=="R" attrib -r "%TargetDir%\%FileToMove%"
+    if not "!Attribs:~2,1!"=="A" attrib -a "%TargetDir%\%FileToMove%"
     
     echo Moved: %FileToMove%
 ) else (
@@ -95,24 +100,34 @@ goto move_file
 rem If no specific files were provided, move all files
 if "%SpecificFiles%"=="0" (
     echo Moving all files from "%SourceDir%" to "%TargetDir%" with attributes...
-    for %%F in ("%SourceDir%\*") do (
-        set "Attribs="
-        for /f "tokens=2 delims= " %%A in ('attrib "%%F"') do set "Attribs=!Attribs!%%A"
+for /f "delims=" %%F in ('dir /a:-d /b "%SourceDir%"') do (
+    set "FileName=%%F"
+    set "Hidden=" & set "ReadOnly=" & set "Archive="
 
-        echo Moving file: %%~nxF [!Attribs!]
-
-        rem Temporarily remove hidden attribute
-        attrib -h "%%F"
-
-        move "%%F" "%TargetDir%\" > nul
-
-        rem Restore hidden attribute if it was set
-        if not "!Attribs!"=="" (
-            attrib +h "%TargetDir%\%%~nxF"
-        )
+    for /f "tokens=* delims=" %%A in ('attrib "%SourceDir%\%%F"') do (
+        set "AttribLine=%%A"
     )
+
+    for %%A in (!AttribLine!) do (
+        if "%%A"=="H" set Hidden=H
+        if "%%A"=="R" set ReadOnly=R
+        if "%%A"=="A" set Archive=A
+    )
+
+    echo Moving file: %%F [!Hidden! !ReadOnly! !Archive!]
+
+    if defined Hidden attrib -H "%SourceDir%\%%F"
+    move "%SourceDir%\%%F" "%TargetDir%\" > nul
+    if errorlevel 1 (
+        echo Failed to move: %%F
+    ) else (
+        echo Moved: %%F
+        if defined Hidden attrib +H "%TargetDir%\%%F"
+    )
+)
 )
 
 rem Completion message
 echo Files have been moved to "%TargetDir%".
 exit /b 0
+echo Exit code %ERRORLEVEL%
